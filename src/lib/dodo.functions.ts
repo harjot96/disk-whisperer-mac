@@ -43,9 +43,13 @@ export const createDodoCheckout = createServerFn({ method: "POST" })
     // support "Card-Optional at $0 Price"), so sending free claimers there just makes them click
     // through a payment screen for an order that's already free.
     if (promoOpen) {
-      const claimed = await license.claimFreeLicense({ email: data.email, productId });
-      if (claimed) {
-        return { ok: true as const, checkoutUrl: null, freeLicense: true };
+      const licenseKey = await license.claimFreeLicense({
+        email: data.email,
+        productId,
+        redirectTo: `${origin}/account`,
+      });
+      if (licenseKey) {
+        return { ok: true as const, checkoutUrl: null, freeLicense: true, licenseKey };
       }
       // Lost the race: the limit filled between the count check and the claim. Fall through to
       // the regular paid checkout below.

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   ArrowRight,
   Check,
+  Copy,
   CreditCard,
   Laptop,
   Loader2,
@@ -87,6 +88,9 @@ function PricingPage() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [purchased, setPurchased] = useState(false);
+  // A free launch claim hands back its key immediately — nothing else is going to show it to
+  // them, since a $0 claim never gets a Dodo receipt email.
+  const [freeLicenseKey, setFreeLicenseKey] = useState<string | null>(null);
   // Signed-in buyers pay with their account email, so the license shows up on /account.
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
 
@@ -123,6 +127,7 @@ function PricingPage() {
         });
         // A free launch claim is issued immediately, with no Dodo checkout to redirect to.
         if (result.freeLicense) {
+          setFreeLicenseKey(result.licenseKey);
           setPurchased(true);
           return;
         }
@@ -174,17 +179,46 @@ function PricingPage() {
             initial={{ opacity: 0, y: -12, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0 }}
-            className="mx-auto mb-6 flex max-w-4xl items-center gap-3 rounded-2xl bg-mint px-5 py-4 font-semibold"
+            className="mx-auto mb-6 max-w-4xl rounded-2xl bg-mint px-5 py-4 font-semibold"
             role="status"
           >
-            <PartyPopper className="size-5 shrink-0" />
-            <span className="flex-1">
-              You've got MacDissect Pro for life! Sign in with the same email to get your license
-              key.
-            </span>
-            <Link to="/auth" className="rounded-xl bg-ink px-4 py-2 text-sm text-cream">
-              Sign in
-            </Link>
+            <div className="flex items-center gap-3">
+              <PartyPopper className="size-5 shrink-0" />
+              <span className="flex-1">
+                {freeLicenseKey
+                  ? "You've got MacDissect Pro for life! Save your license key below — it won't be shown again here."
+                  : "You've got MacDissect Pro for life! Sign in with the same email to get your license key."}
+              </span>
+              {!freeLicenseKey && (
+                <Link to="/auth" className="rounded-xl bg-ink px-4 py-2 text-sm text-cream">
+                  Sign in
+                </Link>
+              )}
+            </div>
+            {freeLicenseKey && (
+              <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl bg-ink px-4 py-3 text-cream">
+                <code className="min-w-0 flex-1 font-mono text-sm font-bold tracking-wider break-all select-all sm:text-base">
+                  {freeLicenseKey}
+                </code>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(freeLicenseKey);
+                      toast.success(
+                        "License key copied. Paste it into MacDissect → Settings → License.",
+                      );
+                    } catch {
+                      toast.error("Couldn't copy. Select the key and copy it manually.");
+                    }
+                  }}
+                  className="flex items-center gap-2 rounded-xl border border-cream/20 px-4 py-2.5 text-sm font-bold transition-colors hover:bg-cream/10"
+                >
+                  <Copy className="size-4" /> Copy
+                </button>
+                <DownloadButton variant="sun" className="px-4 py-2.5 text-sm" />
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
