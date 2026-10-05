@@ -160,13 +160,19 @@ export const FREE_LICENSE_LIMIT = 50;
  * Atomically claims one of the launch's free lifetime licenses and issues it immediately, if any
  * remain. Dodo's hosted checkout can't skip its card form on a $0 one-time purchase (only
  * subscriptions support that), so a free claim never goes through Dodo — it's recorded and
- * issued directly. Returns false if the free-license limit was already reached, in which case
+ * issued directly. Returns null if the free-license limit was already reached, in which case
  * the caller should fall back to the regular paid Dodo checkout.
+ *
+ * The key is handed back to the caller to show on screen immediately: nothing else notifies the
+ * claimer of it (no receipt goes through Dodo for a $0 claim). We also best-effort invite them to
+ * create a website account, so the key still shows up on /account if they come back later —
+ * but that invite email is not guaranteed to arrive, so the caller must not rely on it alone.
  */
 export async function claimFreeLicense(params: {
   email: string;
   productId: string | null;
-}): Promise<boolean> {
+  redirectTo?: string;
+}): Promise<string | null> {
   const supabase = adminClient();
   const paymentId = `free_${crypto.randomUUID()}`;
   const { data: reserved, error } = await supabase.rpc("reserve_free_license_claim", {
@@ -176,16 +182,29 @@ export async function claimFreeLicense(params: {
     p_limit: FREE_LICENSE_LIMIT,
   });
   if (error) throw new Error(`Free license reservation failed: ${error.message}`);
-  if (!reserved) return false;
+  if (!reserved) return null;
 
+  const licenseKey = generateLicenseKey();
   const { error: insertError } = await supabase.from("licenses").insert({
-    license_key: generateLicenseKey(),
+    license_key: licenseKey,
     email: params.email,
     dodo_payment_id: paymentId,
     status: "active",
   });
   if (insertError) throw new Error(`License insert failed: ${insertError.message}`);
-  return true;
+
+  try {
+    await supabase.auth.admin.inviteUserByEmail(
+      params.email,
+      params.redirectTo ? { redirectTo: params.redirectTo } : undefined,
+    );
+  } catch (e) {
+    // Best-effort: the key above is the claimer's real proof, this is just a convenience so it
+    // also shows up on /account. A user who already has an account gets no invite, which is fine.
+    console.error("Free license invite email failed:", e);
+  }
+
+  return licenseKey;
 }
 
 /** How many free launch licenses have been claimed. */

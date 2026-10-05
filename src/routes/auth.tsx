@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AnimatePresence, motion } from "motion/react";
 import { KeyRound, Loader2 } from "lucide-react";
@@ -38,10 +38,54 @@ function authErrorMessage(err: unknown): string {
 
 function AuthPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot" | "reset">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Supabase redirects a password-reset link back here with a recovery session already in the
+  // URL; it fires this event instead of SIGNED_IN so we can show a "choose a new password" form
+  // rather than dropping the user straight into the account they haven't reset yet.
+  useEffect(() => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") setMode("reset");
+    });
+    return () => subscription.subscription.unsubscribe();
+  }, []);
+
+  const submitForgot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth`,
+      });
+      if (error) throw error;
+      toast.success("Check your inbox", {
+        description: `We sent a password reset link to ${email}.`,
+      });
+      setMode("signin");
+    } catch (err) {
+      toast.error(authErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      toast.success("Password updated.");
+      await navigate({ to: "/account" });
+    } catch (err) {
+      toast.error(authErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,7 +139,7 @@ function AuthPage() {
           className="w-full max-w-md"
         >
           <form
-            onSubmit={submit}
+            onSubmit={mode === "forgot" ? submitForgot : mode === "reset" ? submitReset : submit}
             className="rounded-[2rem] border border-ink/10 bg-cream/90 p-8 shadow-[0_30px_60px_-30px_rgba(25,25,37,0.35)] backdrop-blur"
           >
             <span className="grid size-12 place-items-center rounded-2xl bg-ink text-cream">
@@ -110,59 +154,83 @@ function AuthPage() {
                 transition={{ duration: 0.2 }}
               >
                 <h1 className="mt-5 font-display text-3xl font-extrabold tracking-tight">
-                  {mode === "signin" ? "Sign in to your license" : "Create your account"}
+                  {mode === "signin" && "Sign in to your license"}
+                  {mode === "signup" && "Create your account"}
+                  {mode === "forgot" && "Reset your password"}
+                  {mode === "reset" && "Choose a new password"}
                 </h1>
                 <p className="mt-2 text-sm text-ink/60">
-                  Use the same email address you used at checkout.
+                  {mode === "forgot"
+                    ? "We'll email you a link to set a new password."
+                    : mode === "reset"
+                      ? "You're signed in from the reset link. Pick a new password below."
+                      : "Use the same email address you used at checkout."}
                 </p>
               </motion.div>
             </AnimatePresence>
 
-            <div className="mt-6 grid grid-cols-2 rounded-xl bg-ink/5 p-1 text-sm font-semibold">
-              {(["signin", "signup"] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMode(m)}
-                  className={`relative rounded-lg py-2 transition-colors ${
-                    mode === m ? "text-cream" : "text-ink/60 hover:text-ink"
-                  }`}
-                >
-                  {mode === m && (
-                    <motion.span
-                      layoutId="auth-mode"
-                      className="absolute inset-0 rounded-lg bg-ink"
-                      transition={{ type: "spring", visualDuration: 0.3, bounce: 0.2 }}
-                    />
-                  )}
-                  <span className="relative">{m === "signin" ? "Sign in" : "Create account"}</span>
-                </button>
-              ))}
-            </div>
+            {(mode === "signin" || mode === "signup") && (
+              <div className="mt-6 grid grid-cols-2 rounded-xl bg-ink/5 p-1 text-sm font-semibold">
+                {(["signin", "signup"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
+                    className={`relative rounded-lg py-2 transition-colors ${
+                      mode === m ? "text-cream" : "text-ink/60 hover:text-ink"
+                    }`}
+                  >
+                    {mode === m && (
+                      <motion.span
+                        layoutId="auth-mode"
+                        className="absolute inset-0 rounded-lg bg-ink"
+                        transition={{ type: "spring", visualDuration: 0.3, bounce: 0.2 }}
+                      />
+                    )}
+                    <span className="relative">
+                      {m === "signin" ? "Sign in" : "Create account"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
 
-            <label className="mt-6 block text-xs font-bold tracking-wide text-ink/60 uppercase">
-              Email
-              <input
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-ink/15 bg-paper px-4 py-3 text-sm font-medium normal-case transition-colors outline-none focus:border-ink/40 focus:bg-cream"
-              />
-            </label>
-            <label className="mt-3 block text-xs font-bold tracking-wide text-ink/60 uppercase">
-              Password
-              <input
-                type="password"
-                required
-                minLength={6}
-                autoComplete={mode === "signin" ? "current-password" : "new-password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-ink/15 bg-paper px-4 py-3 text-sm font-medium normal-case transition-colors outline-none focus:border-ink/40 focus:bg-cream"
-              />
-            </label>
+            {mode !== "reset" && (
+              <label className="mt-6 block text-xs font-bold tracking-wide text-ink/60 uppercase">
+                Email
+                <input
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-ink/15 bg-paper px-4 py-3 text-sm font-medium normal-case transition-colors outline-none focus:border-ink/40 focus:bg-cream"
+                />
+              </label>
+            )}
+            {mode !== "forgot" && (
+              <label className="mt-3 block text-xs font-bold tracking-wide text-ink/60 uppercase">
+                {mode === "reset" ? "New password" : "Password"}
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-ink/15 bg-paper px-4 py-3 text-sm font-medium normal-case transition-colors outline-none focus:border-ink/40 focus:bg-cream"
+                />
+              </label>
+            )}
+            {mode === "signin" && (
+              <button
+                type="button"
+                onClick={() => setMode("forgot")}
+                className="mt-3 text-sm font-semibold text-ink/60 underline underline-offset-4 hover:text-ink"
+              >
+                Forgot password?
+              </button>
+            )}
 
             <motion.button
               type="submit"
@@ -172,8 +240,26 @@ function AuthPage() {
               className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-6 py-3.5 text-base font-bold text-cream shadow-[4px_4px_0_0_#A78BFA] disabled:opacity-50"
             >
               {busy && <Loader2 className="size-4 animate-spin" />}
-              {busy ? "One moment…" : mode === "signin" ? "Sign in" : "Create account"}
+              {busy
+                ? "One moment…"
+                : mode === "signin"
+                  ? "Sign in"
+                  : mode === "signup"
+                    ? "Create account"
+                    : mode === "forgot"
+                      ? "Send reset link"
+                      : "Update password"}
             </motion.button>
+
+            {mode === "forgot" && (
+              <button
+                type="button"
+                onClick={() => setMode("signin")}
+                className="mt-4 w-full text-center text-sm font-semibold text-ink/60 underline underline-offset-4 hover:text-ink"
+              >
+                Back to sign in
+              </button>
+            )}
           </form>
           <p className="mt-5 text-center text-sm text-ink/55">
             No Pro license yet?{" "}
